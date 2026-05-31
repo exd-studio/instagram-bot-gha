@@ -120,36 +120,63 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
   const tried    = new Set();
   const verified = [];
 
+  // DEBUG: log first tag response to understand API structure
+  const debugTag = hashtags[0];
+  const debugSections = await igPost(`/api/v1/tags/${debugTag}/sections/`, { max_id: '', page: 1, tab: 'recent', include_persistent: 'false' });
+  log(`DEBUG sections keys: ${Object.keys(debugSections || {}).join(',')}`);
+  log(`DEBUG sections sample: ${JSON.stringify(debugSections)?.slice(0, 400)}`);
+  const debugGql = await igGet(`/graphql/query/?query_hash=9b498c08113f1e09617a1703c22b2f32&variables=${encodeURIComponent(JSON.stringify({ tag_name: debugTag, first: 6 }))}`);
+  log(`DEBUG gql keys: ${Object.keys(debugGql || {}).join(',')}`);
+  log(`DEBUG gql sample: ${JSON.stringify(debugGql)?.slice(0, 400)}`);
+  const debugExplore = await igGet(`/api/v1/discover/web/explore_grid/?is_prefetch=false&omit_cover_media=false&use_sectional_payload=true`);
+  log(`DEBUG explore keys: ${Object.keys(debugExplore || {}).join(',')}`);
+  log(`DEBUG explore sample: ${JSON.stringify(debugExplore)?.slice(0, 400)}`);
+
   for (const tag of hashtags) {
     if (verified.length >= needed) break;
 
-    // Fetch recent posts for this hashtag
-    const tagData = await igGet(`/api/v1/tags/web_info/?tag_name=${tag}`);
-    await sleep(400);
-
-    // Get media from top + recent sections
-    const sections = await igPost(`/api/v1/tags/${tag}/sections/`, {
-      tab: 'recent',
-      page: 1,
-      surface: 'grid',
-    });
-    await sleep(400);
-
+    // Try multiple endpoint variations to get hashtag media
     const medias = [];
-    (sections?.sections || []).forEach(s =>
-      (s.layout_content?.medias || []).forEach(m => medias.push(m.media))
-    );
 
-    // Also try top posts
-    const topSections = await igPost(`/api/v1/tags/${tag}/sections/`, {
-      tab: 'top',
+    // Variation 1: POST sections API
+    const sections = await igPost(`/api/v1/tags/${tag}/sections/`, {
+      max_id: '',
       page: 1,
-      surface: 'grid',
+      server_filter_threshold: '0.02',
+      tab: 'recent',
+      include_persistent: 'false',
+      display_mediatype_preference: 'video_then_image',
     });
+    await sleep(350);
+    (sections?.sections || []).forEach(s => {
+      (s.layout_content?.medias || []).forEach(m => m.media && medias.push(m.media));
+      (s.layout_content?.fill_media || []).forEach(m => m.media && medias.push(m.media));
+    });
+
+    // Variation 2: GET web_info for top posts
+    const webInfo = await igGet(`/api/v1/tags/web_info/?tag_name=${tag}`);
     await sleep(300);
-    (topSections?.sections || []).forEach(s =>
-      (s.layout_content?.medias || []).forEach(m => medias.push(m.media))
-    );
+    const topMedia = webInfo?.data?.top?.sections || [];
+    topMedia.forEach(s => {
+      (s.layout_content?.medias || []).forEach(m => m.media && medias.push(m.media));
+    });
+
+    // Variation 3: GraphQL hashtag query (fallback)
+    if (medias.length === 0) {
+      const gql = await igGet(
+        `/graphql/query/?query_hash=9b498c08113f1e09617a1703c22b2f32&variables=${encodeURIComponent(JSON.stringify({ tag_name: tag, first: 12 }))}`
+      );
+      await sleep(300);
+      (gql?.data?.hashtag?.edge_hashtag_to_media?.edges || []).forEach(e => {
+        if (e.node?.owner?.username) medias.push({ user: { username: e.node.owner.username, pk: e.node.owner.id }, pk: e.node.id, caption: { text: e.node?.edge_media_to_caption?.edges?.[0]?.node?.text || '' } });
+      });
+    }
+
+    if (medias.length === 0) {
+      log(`  #${tag}: no media found, skipping`);
+      continue;
+    }
+    log(`  #${tag}: ${medias.length} posts found`);
 
     for (const media of medias) {
       if (verified.length >= needed) break;
