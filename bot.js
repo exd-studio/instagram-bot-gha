@@ -109,11 +109,15 @@ async function getExclusionList() {
 
 async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
   const queries = [
-    'ui ux designer', 'brand designer', 'product designer', 'logo designer',
-    'freelance designer', 'branding studio', 'design entrepreneur',
-    'visual identity designer', 'design agency', 'ui designer portfolio',
-    'startup founder designer', 'digital product designer', 'brand identity',
-    'graphic designer portfolio', 'creative director',
+    'ux designer portfolio', 'brand identity designer', 'logo design studio',
+    'product designer freelance', 'ui designer work', 'design founder',
+    'branding designer', 'visual designer portfolio', 'app designer',
+    'website designer portfolio', 'graphic designer work', 'design studio agency',
+    'saas designer', 'mobile app designer', 'typography designer',
+    'motion designer portfolio', 'illustration designer', 'icon designer',
+    'design system', 'figma designer', 'web designer portfolio',
+    'creative designer', 'design consultant', 'startup design',
+    'ux researcher', 'interaction designer', 'design lead',
   ];
 
   const tried     = new Set();
@@ -147,7 +151,7 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
       if (!u || u.is_private) continue;
 
       const fc = u.edge_followed_by?.count || 0;
-      if (fc < 300 || fc > 80000) continue;
+      if (fc < 200 || fc > 150000) continue;
       if (excluded.has(u.username) || u.username === OWN_ACCOUNT || alreadyEngaged.has(u.username)) continue;
 
       const edge = u.edge_owner_to_timeline_media?.edges?.[0]?.node;
