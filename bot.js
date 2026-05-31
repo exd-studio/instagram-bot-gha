@@ -105,49 +105,65 @@ async function getExclusionList() {
   return all;
 }
 
-// --- Account discovery ---
+// --- Account discovery via hashtags (fresh posts every run) ---
 
 async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
-  const queries = [
-    'ux designer portfolio', 'brand identity designer', 'logo design studio',
-    'product designer freelance', 'ui designer work', 'design founder',
-    'branding designer', 'visual designer portfolio', 'app designer',
-    'website designer portfolio', 'graphic designer work', 'design studio agency',
-    'saas designer', 'mobile app designer', 'typography designer',
-    'motion designer portfolio', 'illustration designer', 'icon designer',
-    'design system', 'figma designer', 'web designer portfolio',
-    'creative designer', 'design consultant', 'startup design',
-    'ux researcher', 'interaction designer', 'design lead',
+  const hashtags = [
+    'uidesign', 'uxdesign', 'branddesign', 'logodesign', 'freelancedesigner',
+    'brandidentity', 'graphicdesigner', 'productdesign', 'uiuxdesign',
+    'figmadesign', 'webdesigner', 'designportfolio', 'brandingdesign',
+    'uxdesigner', 'uidesigner', 'logodesigner', 'designinspiration',
+    'appdesign', 'interfacedesign', 'visualidentity', 'designstudio',
+    'typographydesign', 'motiondesign', 'creativedesign', 'startupdesign',
   ];
 
-  const tried     = new Set();
-  const verified  = [];
+  const tried    = new Set();
+  const verified = [];
 
-  for (const q of queries) {
+  for (const tag of hashtags) {
     if (verified.length >= needed) break;
-    const sd = await igGet(
-      `/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(q)}&include_reel=false`
+
+    // Fetch recent posts for this hashtag
+    const tagData = await igGet(`/api/v1/tags/web_info/?tag_name=${tag}`);
+    await sleep(400);
+
+    // Get media from top + recent sections
+    const sections = await igPost(`/api/v1/tags/${tag}/sections/`, {
+      tab: 'recent',
+      page: 1,
+      surface: 'grid',
+    });
+    await sleep(400);
+
+    const medias = [];
+    (sections?.sections || []).forEach(s =>
+      (s.layout_content?.medias || []).forEach(m => medias.push(m.media))
     );
-    const candidates = (sd?.users || []).map(u => ({
-      username: u.user.username,
-      private: u.user.is_private,
-    }));
-    await sleep(500);
 
-    for (const c of candidates) {
+    // Also try top posts
+    const topSections = await igPost(`/api/v1/tags/${tag}/sections/`, {
+      tab: 'top',
+      page: 1,
+      surface: 'grid',
+    });
+    await sleep(300);
+    (topSections?.sections || []).forEach(s =>
+      (s.layout_content?.medias || []).forEach(m => medias.push(m.media))
+    );
+
+    for (const media of medias) {
       if (verified.length >= needed) break;
-      if (
-        tried.has(c.username) ||
-        excluded.has(c.username) ||
-        c.username === OWN_ACCOUNT ||
-        c.private ||
-        alreadyEngaged.has(c.username)
-      ) continue;
-      tried.add(c.username);
 
-      const pd = await igGet(`/api/v1/users/web_profile_info/?username=${c.username}`);
+      const username = media?.user?.username;
+      if (!username) continue;
+      if (tried.has(username) || excluded.has(username) || username === OWN_ACCOUNT || alreadyEngaged.has(username)) continue;
+      if (media?.user?.is_private) continue;
+      tried.add(username);
+
+      // Fetch full profile to get follower count
+      const pd = await igGet(`/api/v1/users/web_profile_info/?username=${username}`);
       const u  = pd?.data?.user;
-      await sleep(400);
+      await sleep(350);
       if (!u || u.is_private) continue;
 
       const fc = u.edge_followed_by?.count || 0;
@@ -159,10 +175,11 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
         username:      u.username,
         followers:     fc,
         pk:            u.id,
-        latestMediaId: edge?.id || null,
-        latestCaption: edge?.edge_media_to_caption?.edges?.[0]?.node?.text || '',
+        latestMediaId: edge?.id || media?.pk || null,
+        latestCaption: edge?.edge_media_to_caption?.edges?.[0]?.node?.text
+                       || media?.caption?.text || '',
       });
-      log(`  Found @${u.username} (${fc} followers)`);
+      log(`  Found @${u.username} (${fc} followers) via #${tag}`);
     }
   }
   return verified;
