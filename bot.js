@@ -2,8 +2,9 @@
 // Instagram community-building bot for @designedby.surya
 // Runs on GitHub Actions — no Chrome, no osascript, pure HTTPS (Node 18+ built-in fetch)
 
-const fs   = require('fs');
-const path = require('path');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
 
 const DIR          = __dirname;
 const LOG          = path.join(DIR, 'bot.log');
@@ -197,24 +198,51 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
 // --- Engagement ---
 
 async function likePost(mediaId) {
-  const d = await igPost(`/api/v1/web/likes/${mediaId}/like/`, {});
+  // Use just the numeric part of the media ID
+  const id = String(mediaId).split('_')[0];
+  const d = await igPost(`/api/v1/web/likes/${id}/like/`, {});
+  if (d?.status !== 'ok') log(`  Like raw: ${JSON.stringify(d)?.slice(0, 120)}`);
   return d?.status || 'unknown';
 }
 
 async function commentPost(mediaId, text) {
-  const d = await igPost(`/api/v1/web/comments/${mediaId}/add/`, { comment_text: text });
+  const id = String(mediaId).split('_')[0];
+  const d = await igPost(`/api/v1/web/comments/${id}/add/`, { comment_text: text });
+  if (d?.status !== 'ok') log(`  Comment raw: ${JSON.stringify(d)?.slice(0, 120)}`);
   return d?.status || 'unknown';
 }
 
 async function sendDM(userPk, message) {
-  // Broadcast API works correctly in pure HTTP context (outside browser)
-  const d = await igPost(`/api/v1/direct_v2/threads/broadcast/text/`, {
-    recipient_users: `[[${userPk}]]`,
-    text: message,
-  });
-  if (d?.status === 'ok' || d?.payload?.thread_id) return 'sent';
-  log(`  DM raw response: ${JSON.stringify(d)?.slice(0, 150)}`);
-  return 'failed';
+  // Use mobile-style headers — the web broadcast API returns HTML from server context
+  const url  = 'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/';
+  const csrf = getCsrf();
+  const body = `recipient_users=%5B%5B${userPk}%5D%5D&text=${encodeURIComponent(message)}&client_context=${crypto.randomUUID()}`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Cookie': RAW_COOKIES,
+        'x-csrftoken': csrf,
+        'x-ig-app-id': APP_ID,
+        'User-Agent': 'Instagram/289.0.0.77.109 Android (26/8.0.0; 480dpi; 1080x1920; OnePlus; ONEPLUS A3003; OnePlus3; qcom; en_US; 314665256)',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-IG-Connection-Type': 'WIFI',
+        'X-IG-Capabilities': '3brTvwE=',
+        'Accept-Language': 'en-US',
+        'Origin': 'https://www.instagram.com',
+        'Referer': 'https://www.instagram.com/',
+      },
+      body,
+    });
+    const text = await res.text();
+    const d = JSON.parse(text);
+    if (d?.status === 'ok' || d?.payload?.thread_id) return 'sent';
+    log(`  DM raw: ${text.slice(0, 150)}`);
+    return 'failed';
+  } catch(e) {
+    log(`  DM error: ${e.message}`);
+    return 'failed';
+  }
 }
 
 // --- Content helpers ---
@@ -294,17 +322,18 @@ async function main() {
 
     try {
       if (acc.latestMediaId) {
+        await sleep(2000 + Math.random() * 2000); // 2-4s before like
         const likeRes = await likePost(acc.latestMediaId);
         liked = likeRes === 'ok';
         log(`  Like: ${likeRes}`);
-        await sleep(1000);
+        await sleep(3000 + Math.random() * 2000); // 3-5s before comment
 
         if (isDesignRelated(acc.latestCaption)) {
           commentText = generateComment(acc.latestCaption);
           const commentRes = await commentPost(acc.latestMediaId, commentText);
           commented = commentRes === 'ok';
           log(`  Comment: "${commentText}" -> ${commentRes}`);
-          await sleep(1500);
+          await sleep(3000 + Math.random() * 2000); // 3-5s before DM
         }
       } else {
         log('  No posts found');
