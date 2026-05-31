@@ -10,7 +10,7 @@ const LOG          = path.join(DIR, 'bot.log');
 const ENGAGED_LOG  = path.join(DIR, 'engaged.txt');
 const APP_ID       = '936619743392459';
 const OWN_ACCOUNT  = 'designedby.surya';
-const TARGET_DMS   = 13; // 2 runs/day × 13 = ~25 DMs/day
+const TARGET_DMS   = 10; // every hour × 10 = ~240 DMs/day
 
 const RAW_COOKIES = process.env.IG_COOKIES || '';
 if (!RAW_COOKIES.includes('sessionid')) {
@@ -298,7 +298,7 @@ async function main() {
     results.push({ username: acc.username, followers: acc.followers, liked, commented, commentText, dmSent });
 
     if (dmSent && dmsSent < TARGET_DMS) {
-      const delay = 60000 + Math.floor(Math.random() * 90000); // 1–2.5 min between DMs
+      const delay = 30000 + Math.floor(Math.random() * 30000); // 30–60s between DMs
       log(`  Waiting ${Math.round(delay / 1000)}s before next DM...`);
       await sleep(delay);
     }
