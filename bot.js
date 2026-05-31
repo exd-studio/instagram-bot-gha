@@ -176,26 +176,28 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
       log(`  #${tag}: no media found, skipping`);
       continue;
     }
-    log(`  #${tag}: ${medias.length} posts found`);
+    log(`  #${tag}: ${medias.length} posts — sample user keys: ${JSON.stringify(Object.keys(medias[0]?.user || medias[0]?.owner || {}))}`);
 
+    let tagSkipNoUser = 0, tagSkipExcluded = 0, tagSkipPrivate = 0, tagSkipFollowers = 0, tagSkipTried = 0;
     for (const media of medias) {
       if (verified.length >= needed) break;
 
-      const username = media?.user?.username;
-      if (!username) continue;
-      if (tried.has(username) || excluded.has(username) || username === OWN_ACCOUNT || alreadyEngaged.has(username)) continue;
-      if (media?.user?.is_private) continue;
+      const username = media?.user?.username || media?.owner?.username;
+      if (!username) { tagSkipNoUser++; continue; }
+      if (tried.has(username)) { tagSkipTried++; continue; }
+      if (excluded.has(username) || alreadyEngaged.has(username) || username === OWN_ACCOUNT) { tagSkipExcluded++; continue; }
+      if (media?.user?.is_private || media?.owner?.is_private) { tagSkipPrivate++; continue; }
       tried.add(username);
 
       // Fetch full profile to get follower count
       const pd = await igGet(`/api/v1/users/web_profile_info/?username=${username}`);
       const u  = pd?.data?.user;
       await sleep(350);
-      if (!u || u.is_private) continue;
+      if (!u || u.is_private) { tagSkipPrivate++; continue; }
 
       const fc = u.edge_followed_by?.count || 0;
-      if (fc < 200 || fc > 150000) continue;
-      if (excluded.has(u.username) || u.username === OWN_ACCOUNT || alreadyEngaged.has(u.username)) continue;
+      if (fc < 200 || fc > 150000) { tagSkipFollowers++; log(`  skip @${username}: ${fc} followers`); continue; }
+      if (excluded.has(u.username) || u.username === OWN_ACCOUNT || alreadyEngaged.has(u.username)) { tagSkipExcluded++; continue; }
 
       const edge = u.edge_owner_to_timeline_media?.edges?.[0]?.node;
       verified.push({
@@ -206,7 +208,7 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
         latestCaption: edge?.edge_media_to_caption?.edges?.[0]?.node?.text
                        || media?.caption?.text || '',
       });
-      log(`  Found @${u.username} (${fc} followers) via #${tag}`);
+      log(`  ✓ Found @${u.username} (${fc} followers) via #${tag}`);
     }
   }
   return verified;
