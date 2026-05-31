@@ -120,18 +120,6 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
   const tried    = new Set();
   const verified = [];
 
-  // DEBUG: log first tag response to understand API structure
-  const debugTag = hashtags[0];
-  const debugSections = await igPost(`/api/v1/tags/${debugTag}/sections/`, { max_id: '', page: 1, tab: 'recent', include_persistent: 'false' });
-  log(`DEBUG sections keys: ${Object.keys(debugSections || {}).join(',')}`);
-  log(`DEBUG sections sample: ${JSON.stringify(debugSections)?.slice(0, 400)}`);
-  const debugGql = await igGet(`/graphql/query/?query_hash=9b498c08113f1e09617a1703c22b2f32&variables=${encodeURIComponent(JSON.stringify({ tag_name: debugTag, first: 6 }))}`);
-  log(`DEBUG gql keys: ${Object.keys(debugGql || {}).join(',')}`);
-  log(`DEBUG gql sample: ${JSON.stringify(debugGql)?.slice(0, 400)}`);
-  const debugExplore = await igGet(`/api/v1/discover/web/explore_grid/?is_prefetch=false&omit_cover_media=false&use_sectional_payload=true`);
-  log(`DEBUG explore keys: ${Object.keys(debugExplore || {}).join(',')}`);
-  log(`DEBUG explore sample: ${JSON.stringify(debugExplore)?.slice(0, 400)}`);
-
   for (const tag of hashtags) {
     if (verified.length >= needed) break;
 
@@ -176,39 +164,31 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
       log(`  #${tag}: no media found, skipping`);
       continue;
     }
-    log(`  #${tag}: ${medias.length} posts — sample user keys: ${JSON.stringify(Object.keys(medias[0]?.user || medias[0]?.owner || {}))}`);
+    log(`  #${tag}: ${medias.length} posts found`);
 
-    let tagSkipNoUser = 0, tagSkipExcluded = 0, tagSkipPrivate = 0, tagSkipFollowers = 0, tagSkipTried = 0;
     for (const media of medias) {
       if (verified.length >= needed) break;
 
-      const username = media?.user?.username || media?.owner?.username;
-      if (!username) { tagSkipNoUser++; continue; }
-      if (tried.has(username)) { tagSkipTried++; continue; }
-      if (excluded.has(username) || alreadyEngaged.has(username) || username === OWN_ACCOUNT) { tagSkipExcluded++; continue; }
-      if (media?.user?.is_private || media?.owner?.is_private) { tagSkipPrivate++; continue; }
+      // Use data directly from media object — no extra profile API call needed
+      const user     = media?.user || media?.owner;
+      const username = user?.username;
+      if (!username) continue;
+      if (tried.has(username)) continue;
+      if (excluded.has(username) || alreadyEngaged.has(username) || username === OWN_ACCOUNT) continue;
+      if (user?.is_private) continue;
       tried.add(username);
 
-      // Fetch full profile to get follower count
-      const pd = await igGet(`/api/v1/users/web_profile_info/?username=${username}`);
-      const u  = pd?.data?.user;
-      await sleep(350);
-      if (!u || u.is_private) { tagSkipPrivate++; continue; }
+      const pk      = user?.pk || user?.id;
+      const caption = media?.caption?.text || '';
 
-      const fc = u.edge_followed_by?.count || 0;
-      if (fc < 200 || fc > 150000) { tagSkipFollowers++; log(`  skip @${username}: ${fc} followers`); continue; }
-      if (excluded.has(u.username) || u.username === OWN_ACCOUNT || alreadyEngaged.has(u.username)) { tagSkipExcluded++; continue; }
-
-      const edge = u.edge_owner_to_timeline_media?.edges?.[0]?.node;
       verified.push({
-        username:      u.username,
-        followers:     fc,
-        pk:            u.id,
-        latestMediaId: edge?.id || media?.pk || null,
-        latestCaption: edge?.edge_media_to_caption?.edges?.[0]?.node?.text
-                       || media?.caption?.text || '',
+        username,
+        followers: 0,   // not available without profile fetch — skipping filter
+        pk,
+        latestMediaId: media?.pk || media?.id || null,
+        latestCaption: caption,
       });
-      log(`  ✓ Found @${u.username} (${fc} followers) via #${tag}`);
+      log(`  ✓ Found @${username} via #${tag}`);
     }
   }
   return verified;
