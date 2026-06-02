@@ -212,36 +212,74 @@ async function commentPost(mediaId, text) {
   return d?.status || 'unknown';
 }
 
-async function sendDM(userPk, message) {
-  // Use mobile-style headers — the web broadcast API returns HTML from server context
-  const url  = 'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/';
-  const csrf = getCsrf();
-  const body = `recipient_users=%5B%5B${userPk}%5D%5D&text=${encodeURIComponent(message)}&client_context=${crypto.randomUUID()}`;
+// Parse cookie string → Playwright cookie objects
+function parseCookiesForPlaywright(raw) {
+  return raw.split(';').map(c => c.trim()).filter(Boolean).map(c => {
+    const idx = c.indexOf('=');
+    return {
+      name:   c.slice(0, idx).trim(),
+      value:  c.slice(idx + 1).trim(),
+      domain: '.instagram.com',
+      path:   '/',
+    };
+  });
+}
+
+async function sendDM(username, message) {
+  const { chromium } = require('playwright');
+  let browser;
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Cookie': RAW_COOKIES,
-        'x-csrftoken': csrf,
-        'x-ig-app-id': APP_ID,
-        'User-Agent': 'Instagram/289.0.0.77.109 Android (26/8.0.0; 480dpi; 1080x1920; OnePlus; ONEPLUS A3003; OnePlus3; qcom; en_US; 314665256)',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-IG-Connection-Type': 'WIFI',
-        'X-IG-Capabilities': '3brTvwE=',
-        'Accept-Language': 'en-US',
-        'Origin': 'https://www.instagram.com',
-        'Referer': 'https://www.instagram.com/',
-      },
-      body,
+    browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const ctx  = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      viewport:  { width: 1280, height: 800 },
     });
-    const text = await res.text();
-    const d = JSON.parse(text);
-    if (d?.status === 'ok' || d?.payload?.thread_id) return 'sent';
-    log(`  DM raw: ${text.slice(0, 150)}`);
-    return 'failed';
+    await ctx.addCookies(parseCookiesForPlaywright(RAW_COOKIES));
+
+    const page = await ctx.newPage();
+
+    // Navigate to instagram home first to establish session
+    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await sleep(2000);
+
+    // Navigate to target profile
+    await page.goto(`https://www.instagram.com/${username}/`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await sleep(3000);
+
+    // Click the Message button
+    const msgBtn = page.locator('button:has-text("Message"), [role="button"]:has-text("Message")').first();
+    await msgBtn.waitFor({ timeout: 8000 });
+    await msgBtn.click();
+    await sleep(2500);
+
+    // Find the message input box
+    const box = page.locator('[contenteditable="true"], [aria-label="Message"], textarea[placeholder]').first();
+    await box.waitFor({ timeout: 8000 });
+    await box.click();
+    await sleep(500);
+
+    // Paste message text
+    await page.evaluate((msg) => {
+      const el = document.querySelector('[contenteditable="true"]');
+      if (!el) return;
+      const dt = new DataTransfer();
+      dt.setData('text/plain', msg);
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+    }, message);
+    await sleep(1000);
+
+    // Click Send
+    const sendBtn = page.locator('[aria-label="Send"], button:has-text("Send"), [role="button"]:has-text("Send")').first();
+    await sendBtn.waitFor({ timeout: 5000 });
+    await sendBtn.click();
+    await sleep(1500);
+
+    return 'sent';
   } catch(e) {
     log(`  DM error: ${e.message}`);
     return 'failed';
+  } finally {
+    if (browser) await browser.close();
   }
 }
 
@@ -340,7 +378,7 @@ async function main() {
       }
 
       const message = generateDM(acc.username, acc.followers);
-      const dmRes   = await sendDM(acc.pk, message);
+      const dmRes   = await sendDM(acc.username, message);
       dmSent = dmRes === 'sent';
       log(`  DM: ${dmRes}`);
       if (dmSent) { log(`  Message: "${message}"`); dmsSent++; }

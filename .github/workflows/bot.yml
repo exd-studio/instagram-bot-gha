@@ -3,7 +3,7 @@ name: Instagram Outreach Bot
 on:
   schedule:
     - cron: '0 * * * *'   # every hour, 24/7
-  workflow_dispatch:        # manual "Run workflow" button in GitHub UI
+  workflow_dispatch:        # manual "Run workflow" button
 
 jobs:
   run-bot:
@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Checkout repo (includes engaged.txt)
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -20,6 +20,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-v1
+
+      - name: Install dependencies + Playwright browser
+        run: |
+          npm install
+          npx playwright install chromium --with-deps
 
       - name: Run bot
         env:

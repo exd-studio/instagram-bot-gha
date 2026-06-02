@@ -1,0 +1,7 @@
+{
+  "name": "instagram-bot-gha",
+  "version": "1.0.0",
+  "dependencies": {
+    "playwright": "^1.44.0"
+  }
+}
