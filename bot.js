@@ -197,6 +197,12 @@ async function findFreshAccounts(excluded, alreadyEngaged, needed = 18) {
 
 // --- Engagement ---
 
+async function followUser(userPk) {
+  const d = await igPost(`/api/v1/friendships/create/${userPk}/`, {});
+  if (d?.status !== 'ok') log(`  Follow raw: ${JSON.stringify(d)?.slice(0, 120)}`);
+  return d?.status || 'unknown';
+}
+
 async function likePost(mediaId) {
   // Use just the numeric part of the media ID
   const id = String(mediaId).split('_')[0];
@@ -356,27 +362,35 @@ async function main() {
     const acc = accounts[i];
     log(`\n[${i+1}/${accounts.length}, DMs:${dmsSent}/${TARGET_DMS}] @${acc.username} (${acc.followers} followers)`);
 
-    let liked = false, commented = false, commentText = '', dmSent = false;
+    let followed = false, liked = false, commented = false, commentText = '', dmSent = false;
 
     try {
+      // 1. Follow
+      await sleep(1500 + Math.random() * 1500);
+      const followRes = await followUser(acc.pk);
+      followed = followRes === 'ok';
+      log(`  Follow: ${followRes}`);
+
+      // 2. Like + comment latest post
       if (acc.latestMediaId) {
-        await sleep(2000 + Math.random() * 2000); // 2-4s before like
+        await sleep(2000 + Math.random() * 2000);
         const likeRes = await likePost(acc.latestMediaId);
         liked = likeRes === 'ok';
         log(`  Like: ${likeRes}`);
-        await sleep(3000 + Math.random() * 2000); // 3-5s before comment
+        await sleep(3000 + Math.random() * 2000);
 
         if (isDesignRelated(acc.latestCaption)) {
           commentText = generateComment(acc.latestCaption);
           const commentRes = await commentPost(acc.latestMediaId, commentText);
           commented = commentRes === 'ok';
           log(`  Comment: "${commentText}" -> ${commentRes}`);
-          await sleep(3000 + Math.random() * 2000); // 3-5s before DM
+          await sleep(3000 + Math.random() * 2000);
         }
       } else {
         log('  No posts found');
       }
 
+      // 3. DM
       const message = generateDM(acc.username, acc.followers);
       const dmRes   = await sendDM(acc.username, message);
       dmSent = dmRes === 'sent';
@@ -388,7 +402,7 @@ async function main() {
       log(`  Error: ${e.message}`);
     }
 
-    results.push({ username: acc.username, followers: acc.followers, liked, commented, commentText, dmSent });
+    results.push({ username: acc.username, followers: acc.followers, followed, liked, commented, commentText, dmSent });
 
     if (dmSent && dmsSent < TARGET_DMS) {
       const delay = 30000 + Math.floor(Math.random() * 30000); // 30–60s between DMs
@@ -400,7 +414,7 @@ async function main() {
   log('\n=== Summary ===');
   for (const r of results) {
     const c = r.commented ? `"${r.commentText}"` : 'no';
-    log(`@${r.username} (${r.followers}) | liked:${r.liked} | commented:${c} | dm:${r.dmSent}`);
+    log(`@${r.username} | followed:${r.followed} | liked:${r.liked} | commented:${c} | dm:${r.dmSent}`);
   }
   log(`Total DMs sent this run: ${dmsSent}/${TARGET_DMS}`);
   log('=== Run Complete ===\n');
